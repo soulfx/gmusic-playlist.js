@@ -27,6 +27,16 @@ indicating what each column in the file is.
 ## status
 
 development currently in progress. estimated initial release by Dec 18 2015.
+TODO
+- develop CSV parsing logic
+- develop CSV writing logic
+- develop File writing/export logic
+- tie together import logic
+- tie together export logic
+COMPLETE
+- determine correct web service calls
+- encapsulate web service calls
+- insert ui controls
 
 ## see also
 
