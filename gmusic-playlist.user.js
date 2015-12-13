@@ -18,15 +18,96 @@ function contains(string,search) {
     return string.indexOf(search) > -1;
 }
 
-/* handle file for reading and writing. */
-function FileHandler() {
+/* convert between different data types */
+function Converter() {
+    this.csvchar = ',';
+};
+Converter.prototype = {
+    constructor: Converter,
+    quoteCsv: function(str) {
+        if (contains(str,'"') || contains(str,this.csvchar)) {
+            str = str.replace(/"/g,'""');
+        }
+        return '"' + str + '"';
+    },
+    unquoteCsv: function(str) {
+        if (str.length > 0 && str[0] === '"' && str[str.length-1] === '"') {
+            str = str.replace(/""/g,'"').substring(1,str.length-1);
+        }
+        return str;
+    },
+    csvToArray: function(csv) {
+        var arr = [];
+        var val = '';
+        var ignoreSep = false;
+        for (var i = 0; i < csv.length; i++) {
+            var char = csv[i];
+            if (char === this.csvchar && !ignoreSep) {
+                arr.push(this.unquoteCsv(val));
+                val = '';
+                continue;
+            } else if (char === '"') {
+                ignoreSep = !ignoreSep;
+            }
+            val += char;
+        }
+        arr.push(this.unquoteCsv(val));
+        return arr;
+    },
+    arrayToCsv: function(arr) {
+        var csv = '';
+        for (var i=0; i < arr.length; i++) {
+            csv += this.quoteCsv(String(arr[i])) + ',';
+        }
+        return csv.substring(0,csv.length-1);
+    },
+    objectToArray: function(obj,structure) {
+        var arr = []
+        structure = structure == null? Object.keys(obj) : structure;
+        for (var i = 0; i < structure.length; i++) {
+            arr.push(obj[structure[i]]);
+        }
+        return arr;
+    },
+    arrayToObject: function(arr,obj,structure) {
+        structure = structure == null? Object.keys(obj) : structure;
+        obj = obj == null? new Object() : obj;
+        for (var i = 0; i < structure.length; i++) {
+            if (structure[i] == null) {
+                continue;
+            }
+            obj[structure[i]] = arr[i];
+        }
+        return obj;
+    }
+}
+
+/* handle exporting playlists */
+function Exporter() {
+};
+Exporter.prototype = {
+    constructor: Exporter,
+    listenTo: function(ahref) {
+        var exporter = this;
+        ahref.addEventListener('click',function(e){exporter.export.call(exporter,e)},false)
+    },
+    export: function(a) {
+        var doc = new XDoc(document);
+        var down = doc.create('a',null,{
+            'href':'data:text/plain;charset=utf-8,'+encodeURIComponent("hello"),
+            'download':'playlists.csv'}).click();
+    }
+}
+
+/* handle importing playlists */
+function Importer() {
     this.onload = function(event) {
         console.log("file load complete");
         console.log(event.target.result);
     };
 }
-FileHandler.prototype = {
-    constructor: FileHandler,
+Importer.prototype = {
+    constructor: Importer,
     /** register the read function on the input element */
     listenTo: function(input) {
         var file = this;
@@ -272,11 +353,15 @@ var addui = function() {
     var menu = ui.search('//*[@id="playlists"]')[0];
     var inputui = ui.create('input',false,{'type':'file'});
     var importui = ui.create(
-        'div',[ui.create('h4','Import CSV'),inputui]);
-    var exportui = ui.create(
-        'div',ui.create('h4',ui.create('a','Export CSV',{'href':'#exportCSV'})));
-    var floader = new FileHandler();
-    floader.listenTo(inputui);
+        'div',[ui.create('h4','Import Playlists'),inputui]);
+    
+    var exportlink = ui.create('a','Export Playlists',{'href':'#exportCSV'});
+    var exportui = ui.create('div',ui.create('h4',exportlink));
+    
+    var exporter = new Exporter();
+    exporter.listenTo(exportlink);
+    var importer = new Importer();
+    importer.listenTo(inputui);
     
     menu.appendChild(importui);
     menu.appendChild(exportui);
@@ -295,14 +380,13 @@ session.oninit = function(s) {
         var songlist = results[1][0]
         var topsong = songlist[0]
         var song = new Song();
-        song.id = topsong[0];
-        song.title = topsong[1];
-        song.artist = topsong[3];
-        song.album = topsong[4];
+        var conv = new Converter();
+        conv.arrayToObject(topsong,song,['id','title',null,'artist','album']);
         console.log(song);
     };
     music.search("bob");
 };
+
 var tap = new XHRTap();
 /* pull out session information from the clinet/server comms */
 tap.sendcallback = function() {
