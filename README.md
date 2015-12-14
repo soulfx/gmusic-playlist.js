@@ -32,10 +32,10 @@ TODO
 
 - port over 'smart' search capability from python version
 - tie together import logic
-- tie together export logic
 
 COMPLETE
 
+- tie together export logic
 - develop CSV parsing logic
 - develop CSV writing logic
 - develop File writing/export logic
