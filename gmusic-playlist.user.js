@@ -162,15 +162,91 @@ Importer.prototype = {
         var file = this;
         input.addEventListener('change',function(e){file.read.call(file,e);},false);
     },
+    readFile: function(file) {
+        return new Promise(function(resolve,reject) {
+            var reader = new FileReader();
+            var onload = function(event) { resolve(event.target.result); };
+            var onerror = function() { reject(Error('file error')); };
+            reader.addEventListener("load",onload,false);
+            reader.addEventListener("error",onerror,false);
+            reader.readAsText(file);
+        });
+    },
     /* read the select file from an input file element */
     read: function(input) {
         var file = input.target.files[0];
         if (!file) {
             return;
         }
-        var reader = new FileReader();
-        reader.onload = this.onload;
-        reader.readAsText(file);
+        function isHeader(harr) {
+            return harr.indexOf('title') > -1;
+        }
+        function getStructures(harr) {
+            var pstruct = []
+            var sstruct = []
+            for (var i = 0; i < harr.length; i++) {
+                if (harr[i] === 'playlist') {
+                    pstruct.push('name');
+                    sstruct.push(null);
+                } else {
+                    pstruct.push(null);
+                    sstruct.push(harr[i]);
+                }
+            }
+            return {'playlist':pstruct,'song':sstruct};
+        }
+        /* parse the csv file and return an array of songlists */
+        var parseCsv = function(csv) {
+            var conv = new Converter();
+            var songlistmap = {};
+            var lines = csv.split('\n');
+            var sstruct = Object.keys(new Song());
+            var pstruct = sstruct.push('playlist');
+            pstruct = getStructures(pstruct).playlist;
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i];
+                var arr = conv.csvToArray(line);
+                if (i === 0 && isHeader(arr)) {
+                    var structs = getStructures(arr);
+                    sstruct = structs.song;
+                    pstruct = structs.playlist;
+                    continue;
+                }
+                var songlist = conv.arrayToObject(
+                    arr,new Songlist(),pstruct);
+                if (songlistmap[songlist.name] == null) {
+                    songlistmap[songlist.name] = songlist;
+                }
+                songlistmap[songlist.name].songs.push(
+                    conv.arrayToObject(arr,new Song(),sstruct));
+            }
+            var songlists = [];
+            var songlistnames = Object.keys(songlistmap);
+            for (var i = 0; i < songlistnames.length; i++) {
+                songlists.push(songlistmap[songlistnames[i]]);
+            }
+            return songlists;
+        }
+        /* search for gmusic song ids for the songs in each song list */
+        var getGMusicSongIds = function(songlists) {
+            var searchTasks = [];
+            for (var i = 0; i < songlists.length; i++) {
+                for (var j = 0; k < songlists[i].songs.length; k++) {
+                    searchTasks.push(songlists[i].songs[j].getGMusicId());
+                }
+            }
+            return Promise.all(searchTasks).then(function() {
+                return songlists;
+            });
+        }
+        /* create playlists for the songlists */
+        /* TODO */
+        /* convert the songlists back to csv and provide for download, do this on
+           both success and error */
+        /* TODO */
+        this.readFile(file).then(parseCsv).then(function(songlists){
+            console.log(songlists);
+        });
     }
 };
 
@@ -289,6 +365,12 @@ Song.prototype = {
     fromGMusic: function(arr) {
         return new Converter().arrayToObject(
             arr,this,['id','title',null,'artist','album']);
+    },
+    /* return the id if not null, otherwise search GMusic for the id */
+    getGMusicId: function(sess) {
+        sess = sess == null? session : sess;
+        /* TODO */
+        return new Promise();
     }
 };
 
