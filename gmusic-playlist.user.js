@@ -284,6 +284,15 @@ XDoc.prototype = {
             results.push(xpathresults.snapshotItem(i));
         }
         return results;
+    },
+    /* create a XDoc from a string (text/html by default) */
+    fromString(string,type) {
+        if (type == null) {
+            type = 'text/html';
+        }
+        var parser = new DOMParser();
+        this.doc = parser.parseFromString(string,type);
+        return this;
     }
 };
 
@@ -329,7 +338,11 @@ Songlist.prototype = {
     constructor: Songlist,
     /* populate songlist from the typical gmusic response */
     fromGMusic: function(response) {
-        var songArr = JSON.parse(response)[1][0];
+        var songArr = response;
+        if (response.constructor === String) {
+            songArr = null;
+            songArr = JSON.parse(response)[1][0];
+        }
         if (!songArr) {
             return this;
         }
@@ -358,6 +371,8 @@ function Song(src) {
     this.track = null;
     /* this google song id */
     this.id = null;
+    /** notes for this song, such as search info */
+    this.notes = '';
 }
 Song.prototype = {
     constructor: Song,
@@ -369,8 +384,14 @@ Song.prototype = {
     /* return the id if not null, otherwise search GMusic for the id */
     getGMusicId: function(sess) {
         sess = sess == null? session : sess;
-        /* TODO */
-        return new Promise();
+        var song = this;
+        return new Promise(function(resolve,reject){
+            if (song.id !== null) {
+                resolve(song.id);
+                return;
+            }
+            var music = new GMusic(sess);
+        });
     }
 };
 
@@ -399,6 +420,33 @@ GMusic.prototype = {
     search: function(search_string) {
         return this._req("services/search",[search_string,10,null,1]).then(function(resp){
             return new Songlist(search_string+' Search Results').fromGMusic(resp);
+        });
+    },
+    /* return a songlist of all songs in the library */
+    getLibrary: function() {
+        /* ...loadalltracks returns an html document
+           where the library is split between multiple script
+           segments
+         */
+        var getSongArray = function(response) {
+            var songdoc = new XDoc().fromString(response);
+            var songarr = [];
+            var scripts = songdoc.search('//script');
+            var orig_process = window.parent['slat_process']
+            window.parent['slat_process'] = function(songdata) {
+                songarr = songarr.concat(songdata[0]);
+            }
+            for (var i = 0; i < scripts.length; i++) {
+                try {
+                    eval(scripts[i].textContent);
+                } catch (err) {}
+            }
+            window.parent['slat_process'] = orig_process;
+            return songarr;
+        }
+        return this._req("services/streamingloadalltracks",[]).then(
+            getSongArray).then(function(songArray){
+            return new Songlist('Library').fromGMusic(songArray);
         });
     },
     /* return a songlist of thumbs up songs */
@@ -568,20 +616,23 @@ var addui = function() {
     } else {
         console.log('unable to locate menu element');
     }
+    
+    var m = new GMusic(session);
+    m.search("yoko kanno i do").then(function(results) {
+        console.log('obtained search response');
+        console.log(results);
+    }, function(Error) {
+        console.log(Error);
+    });
+    m.getLibrary().then(function(r){
+        console.log(r);
+    });
 };
 window.addEventListener ("load", addui, false);
 
 var session = new SessionInfo();
 session.oninit = function(s) {
     console.log("session information obtained");
-    console.log(s);
-    var music = new GMusic(s);
-    music.search("bob").then(function(results) {
-        console.log('obtained search response');
-        console.log(results);
-    }, function(Error) {
-        console.log(Error);
-    });
 };
 
 var tap = new XHRTap();
