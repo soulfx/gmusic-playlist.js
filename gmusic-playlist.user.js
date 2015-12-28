@@ -17,14 +17,21 @@ var songlist = ["bad","stray cats stray cat strut","just what i needed cars","in
 var STRU = {
     /* search in the string, return true if found, false otherwise */
     contains: function(string, search) {
-        return string.indexOf(search) > -1;
+        return String(string).indexOf(String(search)) > -1;
     },
     closeMatch: function(str1,str2) {
         if (str1 == null || str2 == null) {
             return false;
         }
-        str1 = str1.toLowerCase().replace(/[\W_]+/g,'');
-        str2 = str2.toLowerCase().replace(/[\W_]+/g,'');
+        str1 = String(str1).toLowerCase().replace(/[\W_]+/g,'');
+        str2 = String(str2).toLowerCase().replace(/[\W_]+/g,'');
+        if (str1 === '' && str2 !== '' || str2 === '' && str1 !== '') {
+            return false;
+        }
+        var sizeratio = str1.length/str2.length;
+        if (sizeratio < .5 || sizeratio > 2) {
+            return false;
+        }
         return this.contains(str1,str2) || this.contains(str2,str1);
     }
 };
@@ -46,6 +53,9 @@ Converter.prototype = {
         if (str.length > 0 && str[0] === '"' && str[str.length-1] === '"') {
             str = str.substring(1,str.length-1);
             str = str.replace(/""/g,'"');
+        }
+        if (str === 'null' || str === '') {
+            str = null;
         }
         return str;
     },
@@ -92,11 +102,25 @@ Converter.prototype = {
             obj[structure[i]] = arr[i];
         }
         return obj;
+    },
+    update: function(orig,update) {
+        var keys = Object.keys(orig);
+        for (var i = 0; i < keys.length; i++) {
+            var key = keys[i];
+            if (orig[key] == null && update[key] != null) {
+                orig[key] = update[key];
+            }
+        }
+        return orig;
+    },
+    clone: function(src,dest) {
+        dest = dest == null? new src.constructor() : dest;
+        return this.arrayToObject(this.objectToArray(src),dest);
     }
 };
 
 /* handle exporting playlists */
-function Exporter() {
+function Exporter(filename) {
 }
 Exporter.prototype = {
     constructor: Exporter,
@@ -104,7 +128,30 @@ Exporter.prototype = {
         var exporter = this;
         ahref.addEventListener('click',function(e){exporter.export.call(exporter,e);},false);
     },
+    /* return a csv string for the given songlists */
+    generateCsv: function(songlists) {
+            var csv = '';
+            var conv = new Converter();
+            csv += conv.arrayToCsv(Object.keys(new Song())) + conv.csvchar + 'playlist\n';
+            for (var i = 0; i < songlists.length; i++) {
+                var songlist = songlists[i];
+                for (var j = 0; j < songlist.songs.length; j++) {
+                    var song = songlist.songs[j];
+                    csv += conv.arrayToCsv(conv.objectToArray(song))
+                        + conv.csvchar + conv.quoteCsv(songlist.name) + '\n';
+                }
+            }
+            return csv;
+    },
+    /* trigger a download file for the given csv text */
+    downloadCsv: function(csv,filename) {
+        var doc = new XDoc(document);
+        var down = doc.create('a',null,{
+            'href':'data:text/plain;charset=utf-8,'+encodeURIComponent(csv),
+            'download':filename}).click();
+    },
     export: function(a) {
+        var exporter = this;
         var music = new GMusic(session);
         
         var populateSonglists = function(songlists) {
@@ -118,32 +165,14 @@ Exporter.prototype = {
                 lists.push(music.getPlaylistSongs(songlist).then(addpop));
             }
             lists.push(music.getThumbsUp().then(addpop));
-            /* TODO add playlist of entire library */
+            lists.push(music.getLibrary().then(addpop));
             return Promise.all(lists).then(function() {
                 return populated;
             });
         };
         
-        var generateCsv = function(songlists) {
-            var csv = '';
-            var conv = new Converter();
-            csv += conv.arrayToCsv(Object.keys(new Song())) + conv.csvchar + 'playlist\n';
-            for (var i = 0; i < songlists.length; i++) {
-                var songlist = songlists[i];
-                for (var j = 0; j < songlist.songs.length; j++) {
-                    var song = songlist.songs[j];
-                    csv += conv.arrayToCsv(conv.objectToArray(song))
-                        + conv.csvchar + conv.quoteCsv(songlist.name) + '\n';
-                }
-            }
-            return csv;
-        }
-        
-        music.getPlaylists().then(populateSonglists).then(generateCsv).then(function(csv){
-            var doc = new XDoc(document);
-            var down = doc.create('a',null,{
-            'href':'data:text/plain;charset=utf-8,'+encodeURIComponent(csv),
-            'download':'playlists.csv'}).click();
+        music.getPlaylists().then(populateSonglists).then(function(songlists){
+            exporter.downloadCsv(exporter.generateCsv(songlists),'playlists_export.csv');
         });
     }
 };
@@ -185,7 +214,7 @@ Importer.prototype = {
             var pstruct = []
             var sstruct = []
             for (var i = 0; i < harr.length; i++) {
-                if (harr[i] === 'playlist') {
+                if (harr[i].trim() === 'playlist') {
                     pstruct.push('name');
                     sstruct.push(null);
                 } else {
@@ -201,10 +230,14 @@ Importer.prototype = {
             var songlistmap = {};
             var lines = csv.split('\n');
             var sstruct = Object.keys(new Song());
-            var pstruct = sstruct.push('playlist');
+            var pstruct = Object.keys(new Song());
+            pstruct.push('playlist');
             pstruct = getStructures(pstruct).playlist;
             for (var i = 0; i < lines.length; i++) {
                 var line = lines[i];
+                if (line === '') {
+                    continue;
+                }
                 var arr = conv.csvToArray(line);
                 if (i === 0 && isHeader(arr)) {
                     var structs = getStructures(arr);
@@ -231,7 +264,7 @@ Importer.prototype = {
         var getGMusicSongIds = function(songlists) {
             var searchTasks = [];
             for (var i = 0; i < songlists.length; i++) {
-                for (var j = 0; k < songlists[i].songs.length; k++) {
+                for (var j = 0; j < songlists[i].songs.length; j++) {
                     searchTasks.push(songlists[i].songs[j].getGMusicId());
                 }
             }
@@ -240,12 +273,21 @@ Importer.prototype = {
             });
         }
         /* create playlists for the songlists */
-        /* TODO */
-        /* convert the songlists back to csv and provide for download, do this on
-           both success and error */
-        /* TODO */
-        this.readFile(file).then(parseCsv).then(function(songlists){
-            console.log(songlists);
+        var createGMusicPlaylists = function(songlists) {
+            var createTasks = [];
+            for (var i = 0; i < songlists.length; i++) {
+                var songlist = songlists[i];
+                createTasks.push(songlist.toGMusic());
+            }
+            return Promise.all(createTasks).then(function() {
+                return songlists;
+            });
+        }
+        /* convert the songlists back to csv and provide for download */
+        var exporter = new Exporter();
+        this.readFile(file).then(parseCsv).then(getGMusicSongIds)
+            .then(createGMusicPlaylists).then(function(songlists){
+            exporter.downloadCsv(exporter.generateCsv(songlists),'playlists_import.csv');
         });
     }
 };
@@ -298,18 +340,41 @@ XDoc.prototype = {
 
 /* a filtered list of songs*/
 function Filter(initialList) {
-    this.songs = initialList;
+    this.songs = [];
+    var conv = new Converter();
+    for (var i = 0; i < initialList.length; i++) {
+        this.songs.push(conv.clone(initialList[i]));
+    }
 }
 Filter.prototype = {
     constructor: Filter,
-    apply: function(prop,val) {
+    /* filter out duplicates */
+    rmDuplicates: function() {
+        var map = {};
+        var cleaned = [];
+        for (var i = 0; i < this.songs.length; i++) {
+            var key = this.songs[i].artist +
+                this.songs[i].title +
+                this.songs[i].album +
+                this.songs[i].track;
+            if (!(key in map)) {
+                map[key] = true;
+                cleaned.push(this.songs[i]);
+            }
+        }
+        this.songs = cleaned;
+        return this;
+    },
+    _apply: function(prop,val) {
         if (val == null) {
             return;
         }
         var fsongs = [];
         for (var i = 0; i < this.songs.length; i++) {
-            var song = songs[i];
+            var song = this.songs[i];
             if (STRU.closeMatch(song[prop],val)) {
+                
+                song.notes += prop+":";
                 fsongs.push(song);
             }
         }
@@ -320,8 +385,9 @@ Filter.prototype = {
     bySong: function(song) {
         var keys = Object.keys(song);
         for (var i = 0; i < keys.length; i++) {
-            this.apply(keys[i],song[keys[i]]);
+            this._apply(keys[i],song[keys[i]]);
         }
+        return this;
     }
 };
 
@@ -336,6 +402,20 @@ function Songlist(name,id) {
 }
 Songlist.prototype = {
     constructor: Songlist,
+    /** create a GMusic playlist from this songlist */
+    toGMusic: function(sess) {
+        var songlist = this;
+        if (songlist.id != null) {
+            return new Promise(function(res,rej){res(songlist.id);});
+        }
+        sess = sess == null? session : sess;
+        var music = new GMusic(sess);
+        /* TODO support playlist splitting for 1k+ playlists */
+        return music.createPlaylist(songlist.name).then(function(id){
+            songlist.id = id;
+            return music.addToPlaylist(songlist);
+        });
+    },
     /* populate songlist from the typical gmusic response */
     fromGMusic: function(response) {
         var songArr = response;
@@ -350,15 +430,6 @@ Songlist.prototype = {
             this.songs.push(new Song().fromGMusic(songArr[i]));
         }
         return this;
-    },
-    /** search for the closest matching song in the list */
-    search: function(target) {
-        var filter = new Filter(this.songs);
-        filter.bySong(target);
-        if (filter.songs.length > 0) {
-            return filter.songs[1];
-        }
-        return null;
     }
 };
 
@@ -371,26 +442,55 @@ function Song(src) {
     this.track = null;
     /* this google song id */
     this.id = null;
+    /* the google song id type */
+    this.idtype = null;
+    /* the number of times this song has been played */
+    this.playcount = null;
+    /* the year this song was published */
+    this.year = null;
+    /* the genre of the song */
+    this.genre = null;
     /** notes for this song, such as search info */
     this.notes = '';
 }
 Song.prototype = {
     constructor: Song,
+    toString: function() {
+        return JSON.stringify(this);
+    },
     /* populate based on the typical gmusic array representation */
     fromGMusic: function(arr) {
-        return new Converter().arrayToObject(
-            arr,this,['id','title',null,'artist','album']);
+       var song = this;
+       /* TODO add rating */
+       new Converter().arrayToObject(
+            arr,song,[null,'title',       null,'artist','album',null,null,null,    null,null,
+                      null,'genre',       null,    null,'track',null,null,null,    'year',null,
+                      null,   null,'playcount',    null,   null,null,null,null,    'id','idtype']);
+        if (song.id == null) {
+            song.id = arr[0];
+        }
+        return song;
     },
-    /* return the id if not null, otherwise search GMusic for the id */
+    /* return the id if not null, otherwise search GMusic for the id,
+       if search fails to find a result null will be returned. */
     getGMusicId: function(sess) {
-        sess = sess == null? session : sess;
         var song = this;
-        return new Promise(function(resolve,reject){
-            if (song.id !== null) {
-                resolve(song.id);
-                return;
-            }
-            var music = new GMusic(sess);
+        if (song.id !== null) {
+            return new Promise(function(res,rej){res(song.id);});
+        }
+        sess = sess == null? session : sess;
+        var music = new GMusic(sess);
+        return new Promise(function(res,rej){
+            music.search(song).then(function(filter){
+                if (filter.songs.length > 0) {
+                    song.notes = filter.songs.length +
+                        ' results match ' + filter.songs[0].notes;
+                    new Converter().update(song,filter.songs[0]);
+                }
+                res(song.id);
+            });
+            /* TODO if no song.id, perform another search with
+               stripped out (),{},[],<> */
         });
     }
 };
@@ -416,14 +516,36 @@ GMusic.prototype = {
             request.send(JSON.stringify(postData));
         });
     },
-    /* return a songlist of results */
-    search: function(search_string) {
+    /* return a songlist of songs from the service based on search_string */
+    searchService: function(search_string) {
         return this._req("services/search",[search_string,10,null,1]).then(function(resp){
-            return new Songlist(search_string+' Search Results').fromGMusic(resp);
+            return new Songlist(search_string+' search results').fromGMusic(resp);
+        });
+    },
+    /* return a filtered list of songs based on the given song */
+    search: function(song) {
+        var processes = [];
+        var songs = [];
+        var gmusic = this;
+        var search_string = song.artist == null? '' : song.artist;
+            search_string += song.title == null? '' : ' '+song.title;
+        processes.push(gmusic.getLibrary().then(
+            function(slist){songs = songs.concat(slist.songs)}));
+        processes.push(gmusic.searchService(search_string).then(
+            function(slist){songs = songs.concat(slist.songs)}));
+        return Promise.all(processes).then(function() {
+            return new Filter(songs).bySong(song).rmDuplicates();
         });
     },
     /* return a songlist of all songs in the library */
     getLibrary: function() {
+        var gmusic = this;
+        var session = gmusic.session;
+        if (session.libraryCache != null) {
+            return new Promise(function(resolve,reject){
+                resolve(session.libraryCache);
+            });
+        }
         /* ...loadalltracks returns an html document
            where the library is split between multiple script
            segments
@@ -446,7 +568,8 @@ GMusic.prototype = {
         }
         return this._req("services/streamingloadalltracks",[]).then(
             getSongArray).then(function(songArray){
-            return new Songlist('Library').fromGMusic(songArray);
+            session.libraryCache = new Songlist('Library').fromGMusic(songArray);
+            return session.libraryCache;
         });
     },
     /* return a songlist of thumbs up songs */
@@ -476,18 +599,30 @@ GMusic.prototype = {
         };
         return this._req("services/loaduserplaylist",[String(songlist.id)]).then(genSonglist);
     },
-    /* return an empty songlist */
+    /* return an new empty songlist id with the given name */
     createPlaylist: function(name) {
-        return this._req("services/createplaylist",[false,name,null,[]]);
+        var returnId = function(response) {
+            return JSON.parse(response)[1][0];
+        }
+        return this._req("services/createplaylist",[false,name,null,[]]).then(returnId);
     },
     addToPlaylist: function(songlist) {
-        // data format: ["songlistid",[["songid",tracknumber],["songid",tracknumber]...]
-        return this._req("services/addtrackstoplaylist",songlist.toGPlaylist())
+        var playlist = [songlist.id,[]];
+        var psongs = playlist[1];
+        for (var i = 0; i < songlist.songs.length; i++) {
+            var song = songlist.songs[i];
+            if (song.id != null) {
+                psongs.push([song.id,Number(song.idtype)]);
+            }
+        }
+        return this._req("services/addtrackstoplaylist",playlist);
     }
 }
 
 /* session information needed in order to send reqs to server */
 function SessionInfo(src) {
+    /* the library cache */
+    this.libraryCache = null;
     /* the xt code, not sure exactly what this is yet */
     this.xtcode = null;
     /* the session id, is sent in posts */
@@ -496,7 +631,9 @@ function SessionInfo(src) {
     this.obfid = null;
     /* listener for when the session first becomes valid. */
     this.oninit = function() {
-        console.log("session is valid");
+        new GMusic(this).getLibrary().then(function(songlist){
+            console.log('session active. '+songlist.songs.length+' songs loaded. ');
+        });
     };
 }
 SessionInfo.prototype = {
@@ -597,7 +734,8 @@ XHRTap.prototype = {
 /* wait for the UI to fully load and then insert the import/export controls */
 var addui = function() {
     var ui = new XDoc(document);
-    var menu = ui.search('//*[@id="playlists"]')[0];
+    //var menu = ui.search('//*[@id="playlists"]')[0];
+    var menu = ui.search('//div[@class="nav-section-divider"]')[0];
     var inputui = ui.create('input',false,{'type':'file'});
     var importui = ui.create(
         'div',[ui.create('h4','Import Playlists'),inputui]);
@@ -616,24 +754,10 @@ var addui = function() {
     } else {
         console.log('unable to locate menu element');
     }
-    
-    var m = new GMusic(session);
-    m.search("yoko kanno i do").then(function(results) {
-        console.log('obtained search response');
-        console.log(results);
-    }, function(Error) {
-        console.log(Error);
-    });
-    m.getLibrary().then(function(r){
-        console.log(r);
-    });
 };
 window.addEventListener ("load", addui, false);
 
 var session = new SessionInfo();
-session.oninit = function(s) {
-    console.log("session information obtained");
-};
 
 var tap = new XHRTap();
 /* pull out session information from the clinet/server comms */
