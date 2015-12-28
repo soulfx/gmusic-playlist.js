@@ -30,18 +30,8 @@ development currently in progress. estimated initial release by Dec 18 2015.
 
 TODO
 
-- port over 'smart' search capability from python version
-- tie together import logic
-
-COMPLETE
-
-- tie together export logic
-- develop CSV parsing logic
-- develop CSV writing logic
-- develop File writing/export logic
-- determine correct web service calls
-- encapsulate web service calls
-- insert ui controls
+- handle searches for songs with []<>(){} in them
+- break 1k+ playlists into segements
 
 ## see also
 
