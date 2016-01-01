@@ -48,6 +48,8 @@ var log = new Log();
 
 /* string utility functions */
 var STRU = {
+    /* words that contain an * in them */
+    wildWords: /\w*(\*+)\w*/g,
     brackets: /\[.*?\]|\(.*?\)|\{.*?\}|\<.*?\>/g,
     nonWordChars: /[\W_]+/g,
     /* search in the string, return true if found, false otherwise */
@@ -58,15 +60,16 @@ var STRU = {
         if (!str1 || !str2) {
             return false;
         }
-        var reg1 = String(str1).toLowerCase().replace(STRU.brackets,'').replace(
+        var reg1 = String(str1).toLowerCase().replace(
             STRU.nonWordChars,'');
-        var reg2 = String(str2).toLowerCase().replace(STRU.brackets,'').replace(
+        var reg2 = String(str2).toLowerCase().replace(
             STRU.nonWordChars,'');
         if (reg1 === '' && reg2 !== '' || reg1 === '' && reg2 !== '') {
             return false;
         }
         var sizeratio = reg1.length/reg2.length;
-        if (sizeratio < 0.5 || sizeratio > 2) {
+        if ((sizeratio < 0.5 || sizeratio > 2) &&
+            (!String(str1).match(STRU.brackets) || !String(str1).match(STRU.brackets))) {
             return false;
         }
         /* on the fly regex compilation is just too slow */
@@ -446,20 +449,24 @@ ALooper.prototype = {
 function Filter(initialList) {
     this.songs = initialList;
     this.hasMatch = false;
+    /* key is a property,
+    value is true or false if the property had a match */
+    this.match = {};
 }
 Filter.prototype = {
     constructor: Filter,
-    _apply: function(prop,val) {
+    _apply: function(prop,val,exact) {
         var filter = this;
         if (!val) {
             return new Promise(function(res,rej){res(filter)});
         }
         var fsongs = [];
         return new ALooper(filter.songs).forEach(function(song,sidx){
-            if (STRU.closeMatch(song[prop],val)) {
+            var match = (exact)? song[prop] === val : STRU.closeMatch(song[prop],val);
+            if (match) {
                 var fsong = new Converter().clone(song);
-                fsong.notes += prop+":";
                 fsongs.push(fsong);
+                filter.match[prop] = true;
             }
         }).then(function(){
             if (fsongs.length > 0) {
@@ -470,7 +477,24 @@ Filter.prototype = {
             return filter;
         });
     },
-    bySong: function(song) {
+    removeDuplicates: function() {
+        var filter = this;
+        var unique = {};
+        return new ALooper(filter.songs).forEach(function(song){
+            if (!unique[song.id]) unique[song.id] = song;
+        }).then(function(){
+            filter.songs = [];
+            Object.keys(unique).forEach(function(key){
+                filter.songs.push(unique[key]);
+            });
+            return filter;
+        });
+    },
+    byExactSong: function(song) {
+        return this.bySong(song,true);
+    },
+    bySong: function(song,exactMatch) {
+        exactMatch = exactMatch || false;
         var keys = Object.keys(song);
         var filter = this;
         var filters = [];
@@ -484,7 +508,7 @@ Filter.prototype = {
                     resolve(filter); return;
                 }
                 var key = keys[keyidx++];
-                filter._apply(key,song[key]).then(function(){
+                filter._apply(key,song[key],exactMatch).then(function(){
                     iterator();
                 });
             })();
@@ -536,7 +560,12 @@ Songlist.prototype = {
         var songArr = response;
         if (response.constructor === String) {
             songArr = null;
-            songArr = JSON.parse(response)[1][0];
+            var arr = JSON.parse(response);
+            var rsongs = [];
+            if (arr[1][0]) rsongs = rsongs.concat(arr[1][0]);
+            if (arr[1][3]) rsongs = rsongs.concat(arr[1][3]);
+            if (arr[1][4]) rsongs.push(arr[1][4]);
+            if (rsongs) songArr = rsongs;            
         }
         if (!songArr) {
             log.up(null,'no gmusic songs for '+this.name,this,response);
@@ -544,6 +573,7 @@ Songlist.prototype = {
         }
         var songlist = this;
         songArr.forEach(function(song){
+            if (!song) return;
             songlist.songs.push(new Song().fromGMusic(song));
         });
         log.up(null,'loaded '+this.name,this);
@@ -607,7 +637,10 @@ Song.prototype = {
             log.up(null,song.title+' search complete',[song,filter]);
             if (filter.hasMatch) {
                 song.notes = STRU.pad(filter.songs.length,2) +
-                    ' results match ' + filter.songs[0].notes;
+                    ' results match ';
+                Object.keys(filter.match).forEach(function(key){
+                    song.notes += key+':';
+                });
                 new Converter().update(song,filter.songs[0]);
             }
             log.up(null,null,null,song.title+' id search complete');
@@ -692,8 +725,38 @@ GMusic.prototype = {
         var filterResults = function(filter) {
             return filter.bySong(song);
         };
+        var filterBrackets = function(filter) {
+            if (hasBrackets && !filter.match['title'] ) {
+                    filter.bySong(bless);
+            }
+            return filter;
+        }
+        /* explicity titled songs sometimes have *'s in them */
+        var filterWildChars = function(filter) {
+            if (!filter.match['title'] && song.title.match(STRU.wildWords)) {
+                var tame = new Converter().clone(song);
+                tame.title = song.title.replace(STRU.wildWords,'');
+                filter.bySong(tame);
+            }
+            return filter;
+        }
+        /* attempt to get an exact match */
+        var findExactMatch = function(filter) {
+            if (!filter.match['title']) return filter;
+            return filter.byExactSong(song);
+        }
+        var removeDuplicates = function(filter) {
+            if (filter.hasMatch) {
+                filter.removeDuplicates();
+            }
+            return filter;
+        }
         return Promise.all(processes).then(createFilter).then(
-            filterResults);
+            filterResults).then(
+            filterBrackets).then(
+            filterWildChars).then(
+            findExactMatch).then(
+            removeDuplicates);
     },
     /* return a songlist of all songs in the library */
     getLibrary: function() {
