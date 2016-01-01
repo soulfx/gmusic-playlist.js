@@ -27,7 +27,12 @@ Log.prototype = {
     up: function() {
         var lg = this;
         if (!arguments.length) return;
-        if (lg.status && arguments[0]) lg.status.innerHTML = lg.progress + arguments[0];
+        if (lg.status && arguments[0]) {
+            var msg = arguments[0];
+            setTimeout(function(){
+                lg.status.innerHTML = lg.progress + msg;
+            },1);
+        }
         if (!lg.level) return;
         var cout = [];
         [].slice.call(arguments,0,lg.level).forEach(function(arg){
@@ -53,19 +58,20 @@ var STRU = {
         if (!str1 || !str2) {
             return false;
         }
-        var reg1s = String(str1).replace(STRU.brackets,'').replace(
-            STRU.nonWordChars,'.*');
-        var reg2s = String(str2).replace(STRU.brackets,'').replace(
-            STRU.nonWordChars,'.*');
-        if (reg1s === '.*' && reg2s !== '.*' || reg1s === '.*' && reg2s !== '.*') {
+        var reg1 = String(str1).toLowerCase().replace(STRU.brackets,'').replace(
+            STRU.nonWordChars,'');
+        var reg2 = String(str2).toLowerCase().replace(STRU.brackets,'').replace(
+            STRU.nonWordChars,'');
+        if (reg1 === '' && reg2 !== '' || reg1 === '' && reg2 !== '') {
             return false;
         }
-        var sizeratio = reg1s.length/reg2s.length;
+        var sizeratio = reg1.length/reg2.length;
         if (sizeratio < 0.5 || sizeratio > 2) {
             return false;
         }
-        return str1.match(new RegExp(reg2s,'gi')) || str2.match(new RegExp(reg1s,'gi'));
-        //return this.contains(str1,str2) || this.contains(str2,str1);
+        /* on the fly regex compilation is just too slow */
+        //return str1.match(new RegExp(reg2s,'gi')) || str2.match(new RegExp(reg1s,'gi'));
+        return this.contains(reg1,reg2) || this.contains(reg2,reg1);
     },
     /* left padd a number
     http://stackoverflow.com/a/10073788/5648123
