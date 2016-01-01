@@ -52,6 +52,10 @@ var STRU = {
     wildWords: /\w*(\*+)\w*/g,
     brackets: /\[.*?\]|\(.*?\)|\{.*?\}|\<.*?\>/g,
     nonWordChars: /[\W_]+/g,
+    startswith: function(string, prefix) {
+        if (!prefix || !string) return false;
+        return string.slice(0, prefix.length) === prefix;
+    },
     /* search in the string, return true if found, false otherwise */
     contains: function(string, search) {
         return String(string).indexOf(String(search)) > -1;
@@ -88,8 +92,15 @@ var STRU = {
 };
 
 /* convert between different data types */
-function Converter() {
+function Converter(other) {
     this.csvchar = ',';
+    /* object keys with this prefix will be ignored
+    and treated as transient */
+    this.tprefix = '_';
+    var my = this;
+    other && Object.keys(other).forEach(function(key) {
+        my[key] = other[key];
+    });
 }
 Converter.prototype = {
     constructor: Converter,
@@ -136,17 +147,29 @@ Converter.prototype = {
         });
         return csv.substring(0,csv.length-1);
     },
+    struct: function(obj) {
+        var struct = [];
+        var conv = this;
+        Object.keys(obj).forEach(function(key){
+            if (STRU.startswith(key,conv.tprefix)) return;
+            struct.push(key);
+        });
+        return struct;
+    },
     objectToArray: function(obj,structure) {
         var arr = [];
-        structure = !structure? Object.keys(obj) : structure;
+        var conv = this;
+        structure = structure || conv.struct(obj);
         structure.forEach(function(key){
             arr.push(obj[key]);
         });
         return arr;
     },
     arrayToObject: function(arr,obj,structure) {
-        structure = !structure? Object.keys(obj) : structure;
+        var conv = this;
+        structure = structure || conv.struct(obj);
         obj = !obj? {} : obj;
+        var conv = this;
         structure.forEach(function(key,idx){
             if (!key) return;
             obj[key] = arr[idx];
@@ -181,7 +204,7 @@ Exporter.prototype = {
     generateCsv: function(songlists) {
         var csv = '';
         var conv = new Converter();
-        csv += conv.arrayToCsv(Object.keys(new Song())) + conv.csvchar + 'playlist\n';
+        csv += conv.arrayToCsv(conv.struct(new Song())) + conv.csvchar + 'playlist\n';
         songlists.forEach(function(songlist){
             songlist.songs.forEach(function(song){
                 csv += conv.arrayToCsv(conv.objectToArray(song)) +
@@ -290,8 +313,8 @@ Importer.prototype = {
             var conv = new Converter();
             var songlistmap = {};
             var lines = csv.split('\n');
-            var sstruct = Object.keys(new Song());
-            var pstruct = Object.keys(new Song());
+            var sstruct = conv.struct(new Song());
+            var pstruct = conv.struct(new Song());
             pstruct.push('playlist');
             pstruct = getStructures(pstruct).playlist;
             lines.forEach(function(line,i){
@@ -464,7 +487,7 @@ Filter.prototype = {
         return new ALooper(filter.songs).forEach(function(song,sidx){
             var match = (exact)? song[prop] === val : STRU.closeMatch(song[prop],val);
             if (match) {
-                var fsong = new Converter().clone(song);
+                var fsong = new Converter({'tprefix':null}).clone(song);
                 fsongs.push(fsong);
                 filter.match[prop] = true;
             }
@@ -557,25 +580,31 @@ Songlist.prototype = {
     },
     /* populate songlist from the typical gmusic response */
     fromGMusic: function(response) {
-        var songArr = response;
-        if (response.constructor === String) {
-            songArr = null;
-            var arr = JSON.parse(response);
-            var rsongs = [];
-            if (arr[1][0]) rsongs = rsongs.concat(arr[1][0]);
-            if (arr[1][3]) rsongs = rsongs.concat(arr[1][3]);
-            if (arr[1][4]) rsongs.push(arr[1][4]);
-            if (rsongs) songArr = rsongs;            
-        }
-        if (!songArr) {
-            log.up(null,'no gmusic songs for '+this.name,this,response);
-            return this;
-        }
         var songlist = this;
-        songArr.forEach(function(song){
-            if (!song) return;
-            songlist.songs.push(new Song().fromGMusic(song));
-        });
+        var addsng = function(sng,top) {
+            if (!sng) return;
+            top = top || false;
+            var song = new Song().fromGMusic(sng);
+            if (!song.id) return;
+            song._gsuggested = top;
+            songlist.songs.push(song);
+        };
+        if (response.constructor === String) {
+            var arr = JSON.parse(response);
+            /* the usual list of found songs */
+            arr[1][0] && arr[1][0].forEach(function(sng) {
+                addsng(sng);
+            });
+            /* top suggested songs */
+            arr[1][3] && arr[1][3].forEach(function(sng){
+                addsng(sng,true);
+            });
+            if (arr[1][4]) addsng(arr[1][4],true);
+        } else {
+            response.forEach(function(song){
+                addsng(song);
+            });
+        }
         log.up(null,'loaded '+this.name,this);
         return this;
     }
@@ -588,6 +617,8 @@ function Song(src) {
     this.album = null;
     /* track postion of song in album */
     this.track = null;
+    /** duration of the song */
+    this.duration = null;
     /* this google song id */
     this.id = null;
     /* the google song id type 1 (free/purcahsed),
@@ -603,6 +634,8 @@ function Song(src) {
     this.genre = null;
     /** notes for this song, such as search info */
     this.notes = '';
+    /** if this song was suggested as a top match by google */
+    this._gsuggested = false;
 }
 Song.prototype = {
     constructor: Song,
@@ -614,7 +647,7 @@ Song.prototype = {
        var song = this;
        new Converter().arrayToObject(
             arr,song,[null,'title',       null,'artist','album',null,null,null,    null,null,
-                      null,'genre',       null,    null,'track',null,null,null,    'year',null,
+                      null,'genre',       null,    'duration','track',null,null,null,    'year',null,
                       null,   null,'playcount',    'rating',   null,null,null,null,    'id','idtype']);
         /* use the unique ID for non all access (personal) songs */
         if (!song.id || song.idtype === 2 || song.idtype === 6 || song.idtype === 1) {
@@ -692,6 +725,7 @@ GMusic.prototype = {
     },
     /* return a filtered list of songs based on the given song */
     search: function(song) {
+        song._gsuggested = true;
         var processes = [];
         var songs = [];
         var gmusic = this;
@@ -734,7 +768,7 @@ GMusic.prototype = {
         /* explicity titled songs sometimes have *'s in them */
         var filterWildChars = function(filter) {
             if (!filter.match['title'] && song.title.match(STRU.wildWords)) {
-                var tame = new Converter().clone(song);
+                var tame = new Converter({'tprefix':null}).clone(song);
                 tame.title = song.title.replace(STRU.wildWords,'');
                 filter.bySong(tame);
             }
@@ -859,7 +893,7 @@ GMusic.prototype = {
                 psongs.push([song.id,Number(song.idtype)]);
             }
         });
-        log.up('adding tracks to '+playlist.name,playlist);
+        log.up('adding tracks to '+songlist.name,[songlist,playlist]);
         return this._req("services/addtrackstoplaylist",playlist);
     }
 };
