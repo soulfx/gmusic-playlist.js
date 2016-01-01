@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         gmusic-playlist
 // @namespace    https://github.com/soulfx/gmusic-playlist.js
-// @version      0.151208
+// @version      0.160101
 // @description  import and export playlists in google music
 // @author       soulfx <john.elkins@yahoo.com>
 // @match        https://play.google.com/music/listen*
@@ -11,7 +11,8 @@
 'use strict';
 
 function Log() {
-    /* 0 - n console log level, higher levels are more verbose. 0 disables logging */
+    /* 0 - n console log level, higher levels are more verbose.
+       0 disables console logging */
     this.level = 1;
     /* an element to write one line status entries via innerHTML */
     this.status = null;
@@ -24,22 +25,17 @@ Log.prototype = {
     constructor: Log,
     /* update the log */
     up: function() {
-        if (!arguments.length) return;
-        var firstEntry = true;
         var lg = this;
-        [].slice.call(arguments).forEach(function(arg,lvl){
-            if (!arg || lvl >= lg.level) return;
-            if (firstEntry && lg.status) {
-                var updateStatus = function() {
-                    lg.status.innerHTML = lg.progress + arg;
-                }
-                setTimeout(updateStatus,1);
-            }
-            console.log(arg);
+        if (!arguments.length) return;
+        if (lg.status && arguments[0]) lg.status.innerHTML = lg.progress + arguments[0];
+        if (!lg.level) return;
+        var cout = [];
+        [].slice.call(arguments,0,lg.level).forEach(function(arg){
+            if (arg) cout.push(arg);
         });
-        if (this.showStack) {
-            console.log(new Error().stack.split('\n').slice(2).join('\n'));
-        }
+        if (this.showStack) cout.push(
+            new Error().stack.split('\n').slice(2).join('\n'));
+        if (cout.length) console.log(cout);
     }
 };
 /* global level log variable */
@@ -47,6 +43,7 @@ var log = new Log();
 
 /* string utility functions */
 var STRU = {
+    brackets: /\[.*?\]|\(.*?\)|\{.*?\}|\<.*?\>/g,
     nonWordChars: /[\W_]+/g,
     /* search in the string, return true if found, false otherwise */
     contains: function(string, search) {
@@ -56,16 +53,28 @@ var STRU = {
         if (!str1 || !str2) {
             return false;
         }
-        str1 = String(str1).toLowerCase().replace(STRU.nonWordChars,'');
-        str2 = String(str2).toLowerCase().replace(STRU.nonWordChars,'');
-        if (str1 === '' && str2 !== '' || str2 === '' && str1 !== '') {
+        var reg1s = String(str1).replace(STRU.brackets,'').replace(
+            STRU.nonWordChars,'.*');
+        var reg2s = String(str2).replace(STRU.brackets,'').replace(
+            STRU.nonWordChars,'.*');
+        if (reg1s === '.*' && reg2s !== '.*' || reg1s === '.*' && reg2s !== '.*') {
             return false;
         }
-        var sizeratio = str1.length/str2.length;
+        var sizeratio = reg1s.length/reg2s.length;
         if (sizeratio < 0.5 || sizeratio > 2) {
             return false;
         }
-        return this.contains(str1,str2) || this.contains(str2,str1);
+        return str1.match(new RegExp(reg2s,'gi')) || str2.match(new RegExp(reg1s,'gi'));
+        //return this.contains(str1,str2) || this.contains(str2,str1);
+    },
+    /* left padd a number
+    http://stackoverflow.com/a/10073788/5648123
+    */
+    pad: function(num, width, pchar) {
+        pchar = pchar || '0';
+        num = String(num);
+        return num.length >= width ?
+            num : new Array(width - num.length+1).join(pchar)+num;
     }
 };
 
@@ -175,10 +184,13 @@ Exporter.prototype = {
     },
     /* trigger a download file for the given csv text */
     downloadCsv: function(csv,filename) {
+        /* use blob to overcome href data limits */
+        var blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+        var url = URL.createObjectURL(blob);
         var doc = new XDoc(document);
         var down = doc.create('a',null,{
-            'href':'data:text/plain;charset=utf-8,'+encodeURIComponent(csv),
-            'download':filename}).click();
+            'href':url,'download':filename}).click();
+        /* TODO may need to call revokeOjectURL to clean up mem */
     },
     export: function(a) {
         var exporter = this;
@@ -206,7 +218,6 @@ Exporter.prototype = {
                 return populated;
             });
         };
-        
         music.getPlaylists().then(populateSonglists).then(function(songlists){
             exporter.downloadCsv(exporter.generateCsv(songlists),'playlists_export.csv');
         });
@@ -311,12 +322,13 @@ Importer.prototype = {
             var progress = function(){return songcount + '/' + searchTasks.length + ' songs. ';};
             songlists.forEach(function(songlist){
                 songlist.songs.forEach(function(song){
-                    searchTasks.push(song.getGMusicId().then(function(){
+                    searchTasks.push(
+                        song.getGMusicId().then(function(){
                         if (song.id) {
                             ++songcount;
                         }
                         log.progress = progress();
-                        log.up(song.title);
+                        log.up(song.title,"search complete",song);
                     }));
                 });
             });
@@ -434,7 +446,6 @@ Filter.prototype = {
     _apply: function(prop,val) {
         var filter = this;
         if (!val) {
-            log.up(null,null,prop+' filter has no value');
             return new Promise(function(res,rej){res(filter)});
         }
         var fsongs = [];
@@ -449,7 +460,7 @@ Filter.prototype = {
                 filter.hasMatch = true;
                 filter.songs = fsongs;
             }
-            log.up(null,'applyed filter '+prop+':'+val);
+            log.up(null,null,null,'applyed filter '+prop+':'+val,filter);
             return filter;
         });
     },
@@ -458,12 +469,12 @@ Filter.prototype = {
         var filter = this;
         var filters = [];
         
-        /* TODO there has to be a less convoluted way to do this */
+        /* apply the filters one after another asyncly */
         return new Promise(function(resolve,rej){
             var keyidx = 0;
             (function iterator() {
                 if (!(keyidx < keys.length)) {            
-                    log.up(null,'filter complete for '+song.title,filter);
+                    log.up(null,null,null,'filter complete for '+song.title,filter);
                     resolve(filter); return;
                 }
                 var key = keys[keyidx++];
@@ -529,7 +540,7 @@ Songlist.prototype = {
         songArr.forEach(function(song){
             songlist.songs.push(new Song().fromGMusic(song));
         });
-        log.up(null,'loaded '+this.name,null,this);
+        log.up(null,'loaded '+this.name,this);
         return this;
     }
 };
@@ -543,10 +554,13 @@ function Song(src) {
     this.track = null;
     /* this google song id */
     this.id = null;
-    /* the google song id type */
+    /* the google song id type 1 (free/purcahsed),
+       2 (uploaded/non matched), 6 (uploaded/matched), * (other)  */
     this.idtype = null;
     /* the number of times this song has been played */
     this.playcount = null;
+    /* the rating of a song, 1 (down) 5 (up) */
+    this.rating = null;
     /* the year this song was published */
     this.year = null;
     /* the genre of the song */
@@ -562,15 +576,15 @@ Song.prototype = {
     /* populate based on the typical gmusic array representation */
     fromGMusic: function(arr) {
        var song = this;
-       /* TODO add rating */
        new Converter().arrayToObject(
             arr,song,[null,'title',       null,'artist','album',null,null,null,    null,null,
                       null,'genre',       null,    null,'track',null,null,null,    'year',null,
-                      null,   null,'playcount',    null,   null,null,null,null,    'id','idtype']);
-        if (!song.id || song.idtype === 2 || song.idtype === 6) {
+                      null,   null,'playcount',    'rating',   null,null,null,null,    'id','idtype']);
+        /* use the unique ID for non all access (personal) songs */
+        if (!song.id || song.idtype === 2 || song.idtype === 6 || song.idtype === 1) {
             song.id = arr[0];
         }
-        log.up(null,null,'loaded song '+song.title,song,arr);
+        log.up(null,null,null,'loaded song '+song.title,[song,arr]);
         return song;
     },
     /* return the id if not null, otherwise search GMusic for the id,
@@ -584,17 +598,15 @@ Song.prototype = {
         var music = new GMusic(sess);
         log.up(null,'looking for song id for '+song.title,song);
         return music.search(song).then(function(filter){
-            log.up(null,'music search complete',filter,song);
+            log.up(null,song.title+' search complete',[song,filter]);
             if (filter.hasMatch) {
-                song.notes = filter.songs.length +
+                song.notes = STRU.pad(filter.songs.length,2) +
                     ' results match ' + filter.songs[0].notes;
                 new Converter().update(song,filter.songs[0]);
             }
-            log.up(null,song.title+' id search complete');
+            log.up(null,null,null,song.title+' id search complete');
             return song.id;
         },function(err){log.up(err)});
-        /* TODO if no song.id, perform another search with
-               stripped out (),{},[],<> */
     }
 };
 
@@ -625,8 +637,18 @@ GMusic.prototype = {
     },
     /* return a songlist of songs from the service based on search_string */
     searchService: function(search_string) {
+        var gmusic = this;
         return this._req("services/search",[search_string,10,null,1]).then(function(resp){
-            return new Songlist(search_string+' search results').fromGMusic(resp);
+            var resultlist = new Songlist(search_string+' search results').fromGMusic(resp);
+            if (!resultlist.songs.length) {
+                var suggestion = JSON.parse(resp)[1][10];
+                if (suggestion) {
+                    log.up(null,'retrying search using suggestion '+suggestion,[resp]);
+                    return gmusic.searchService(suggestion);
+                }
+            }
+            log.up(null,'recieved search response for '+search_string,[resp,resultlist]);
+            return resultlist;
         });
     },
     /* return a filtered list of songs based on the given song */
@@ -634,19 +656,38 @@ GMusic.prototype = {
         var processes = [];
         var songs = [];
         var gmusic = this;
-        var search_string = !song.artist? '' : song.artist;
-            search_string += !song.title? '' : ' '+song.title;
+        var search_string = function(song){
+            var string = !song.artist? '' : song.artist;
+            string += !song.title? '' : ' '+song.title;
+            return string;
+        };
+        var bless = new Song();
+        var hasBrackets = false;
+        Object.keys(song).forEach(function(key){
+            if (!song[key]) return;
+            var src = String(song[key]);
+            bless[key] = src.replace(STRU.brackets,'');
+            if (bless[key] !== src) {
+                hasBrackets = true;
+            }
+        });
         processes.push(gmusic.getLibrary().then(
             function(slist){songs = songs.concat(slist.songs);}));
-        processes.push(gmusic.searchService(search_string).then(
+        processes.push(gmusic.searchService(search_string(song)).then(
             function(slist){songs = songs.concat(slist.songs);}));
+        if (hasBrackets) {
+            log.up(null,'performing extra search for bracketless version '+bless.title,bless);
+            processes.push(gmusic.searchService(search_string(bless)).then(
+            function(slist){songs = songs.concat(slist.songs);}));
+        }
         var createFilter = function() {
             return new Filter(songs);
         };
         var filterResults = function(filter) {
             return filter.bySong(song);
         };
-        return Promise.all(processes).then(createFilter).then(filterResults);
+        return Promise.all(processes).then(createFilter).then(
+            filterResults);
     },
     /* return a songlist of all songs in the library */
     getLibrary: function() {
