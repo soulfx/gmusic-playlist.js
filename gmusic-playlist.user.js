@@ -1,9 +1,10 @@
 // ==UserScript==
+// License: MIT <LICENSE>
+// @author       soulfx <john.elkins@yahoo.com>
 // @name         gmusic-playlist
 // @namespace    https://github.com/soulfx/gmusic-playlist.js
 // @version      0.160101
 // @description  import and export playlists in google music
-// @author       soulfx <john.elkins@yahoo.com>
 // @match        https://play.google.com/music/listen*
 // @grant        none
 // ==/UserScript==
