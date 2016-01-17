@@ -7,8 +7,6 @@ javascript based playlist scripts for gmusic
  
  - greasemonkey addon for your browser
   - chrome: [tampermonkey extension](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=en)
-  - firefox: [greasemonkey add-on](https://addons.mozilla.org/en-us/firefox/addon/greasemonkey/) -- not yet tested
-  - ie: ?
 
 ## installation
 
@@ -56,6 +54,10 @@ click the Export Playlists link to export the playlists.
 
 in addition to playlists, the entire personal library will also be exported
 into a playlist called Library.
+
+## known issues
+
+although there is a [greasemonkey addon](https://addons.mozilla.org/en-us/firefox/addon/greasemonkey/) for firefox this script is only compatible with chrome for now.
 
 ## see also
 
