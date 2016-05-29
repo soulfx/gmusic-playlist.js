@@ -57,7 +57,11 @@ into a playlist called Library.
 
 ## known issues
 
+### no firefox support
 although there is a [greasemonkey addon](https://addons.mozilla.org/en-us/firefox/addon/greasemonkey/) for firefox this script is only compatible with chrome for now.
+
+### large playlists
+when importing a new playlist avoid importing large playlists (10k+ songs) all at once. google only allows so many search operations per period of time. if the max number of allowed operations per period of time is reached any further requests to the google music service will be denied until a cool down period has passed.
 
 ## see also
 
