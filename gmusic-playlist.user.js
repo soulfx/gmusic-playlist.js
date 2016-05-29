@@ -3,55 +3,39 @@
 // @author       soulfx <john.elkins@yahoo.com>
 // @name         gmusic-playlist
 // @namespace    https://github.com/soulfx/gmusic-playlist.js
-// @version      0.160101
+// @version      0.160528
 // @description  import and export playlists in google music
 // @match        https://play.google.com/music/listen*
 // @grant        none
 // ==/UserScript==
 /* jshint -W097 */
+/* globals console,Promise */
 'use strict';
 
-function Log() {
-    /* 0 - n console log level, higher levels are more verbose.
-       0 disables console logging */
-    this.level = 1;
-    /* an element to write one line status entries via innerHTML */
-    this.status = null;
-    /* display the stack for each log output */
-    this.showStack = false;
-    /* overall progress text */
+var debug = function() { console.log(arguments); };
+var trace = function() {/* do nothing */};
+var debug = function() {/* do nothing */}
+
+function Status() {
+    this.element = null;
     this.progress = '';
 }
-Log.prototype = {
-    constructor: Log,
-    /* update the log */
-    up: function() {
-        var lg = this;
-        if (!arguments.length) return;
-        if (lg.status && arguments[0]) {
-            var msg = arguments[0];
-            setTimeout(function(){
-                lg.status.innerHTML = lg.progress + msg;
-            },1);
-        }
-        if (!lg.level) return;
-        var cout = [];
-        [].slice.call(arguments,0,lg.level).forEach(function(arg){
-            if (arg) cout.push(arg);
-        });
-        if (this.showStack) cout.push(
-            new Error().stack.split('\n').slice(2).join('\n'));
-        if (cout.length) console.log(cout);
+Status.prototype = {
+    constructor: Status,
+    update: function(msg) {
+        var stat = this;
+        setTimeout(function(){
+            stat.element.innerHTML = stat.progress + msg;
+        },500);
     }
 };
-/* global level log variable */
-var log = new Log();
+var stat = new Status();
 
 /* string utility functions */
 var STRU = {
     /* words that contain an * in them */
     wildWords: /\w*(\*+)\w*/g,
-    brackets: /\[.*?\]|\(.*?\)|\{.*?\}|\<.*?\>/g,
+    brackets: /\[.*?\]|\(.*?\)|\{.*?\}|<.*?>/g,
     nonWordChars: /[\W_]+/g,
     startswith: function(string, prefix) {
         if (!prefix || !string) return false;
@@ -99,9 +83,10 @@ function Converter(other) {
     and treated as transient */
     this.tprefix = '_';
     var my = this;
-    other && Object.keys(other).forEach(function(key) {
-        my[key] = other[key];
-    });
+    if (other) {
+        Object.keys(other).forEach(function(key) {
+        my[key] = other[key];});
+    }
 }
 Converter.prototype = {
     constructor: Converter,
@@ -119,6 +104,9 @@ Converter.prototype = {
         }
         if (str === 'null' || str === '') {
             str = null;
+        }
+        if (str === 'undefined') {
+            str = undefined;
         }
         return str;
     },
@@ -170,7 +158,7 @@ Converter.prototype = {
         var conv = this;
         structure = structure || conv.struct(obj);
         obj = !obj? {} : obj;
-        var conv = this;
+        conv = this;
         structure.forEach(function(key,idx){
             if (!key) return;
             obj[key] = arr[idx];
@@ -212,7 +200,7 @@ Exporter.prototype = {
                     conv.csvchar + conv.quoteCsv(songlist.name) + '\n';
             });
         });
-        log.up('generated csv for '+songlists.length+' playlists',null,csv);
+        stat.update('generated csv for '+songlists.length+' playlists');
         return csv;
     },
     /* trigger a download file for the given csv text */
@@ -228,7 +216,6 @@ Exporter.prototype = {
     export: function(a) {
         var exporter = this;
         var music = new GMusic(session);
-        
         var populateSonglists = function(songlists) {
             var lists = [];
             var populated = [];
@@ -240,14 +227,14 @@ Exporter.prototype = {
             });
             lists.push(music.getThumbsUp().then(addpop));
             lists.push(music.getLibrary().then(addpop));
-            log.up('queued up '+lists.length+' playlists for download');
+            stat.update('queued up '+lists.length+' playlists for download');
             return Promise.all(lists).then(function() {
                 var totalSongs = 0;
                 populated.forEach(function(plist){
                     totalSongs += plist.songs.length;
                 });
-                log.progress = totalSongs + ' songs. ';
-                log.up('obtained '+populated.length+' playlists',populated);
+                stat.progress = totalSongs + ' songs. ';
+                stat.update('obtained '+populated.length+' playlists');
                 return populated;
             });
         };
@@ -272,7 +259,7 @@ Importer.prototype = {
         input.addEventListener('change',function(e){file.read.call(file,e);},false);
     },
     readFile: function(file) {
-        log.up('preparing to read file',file);
+        stat.update('preparing to read file');
         return new Promise(function(resolve,reject) {
             var reader = new FileReader();
             var onload = function(event) {resolve(event.target.result); };
@@ -286,11 +273,11 @@ Importer.prototype = {
     read: function(input) {
         var file = input.target.files[0];
         if (!file) {
-            log.up('file is not valid');
+            stat.update('file is not valid');
             return;
         }
         function isHeader(harr) {
-            log.up('checking for header',harr);
+            stat.update('checking for header');
             return harr.indexOf('title') > -1;
         }
         function getStructures(harr) {
@@ -306,7 +293,7 @@ Importer.prototype = {
                 }
             });
             var hstructs = {'playlist':pstruct,'song':sstruct};
-            log.up('returning header structures',hstructs);
+            stat.update('returning header structures');
             return hstructs;
         }
         /* parse the csv file and return an array of songlists */
@@ -345,33 +332,38 @@ Importer.prototype = {
             songlistnames.forEach(function(name){
                 songlists.push(songlistmap[name]);
             });
-            log.up('parsed '+songlists.length+' playlists',songlists);
+            stat.update('parsed '+songlists.length+' playlists');
             return songlists;
         };
         /* search for gmusic song ids for the songs in each song list */
         var getGMusicSongIds = function(songlists) {
-            var searchTasks = [];
             var songcount = 0;
-            var progress = function(){return songcount + '/' + searchTasks.length + ' songs. ';};
+            var allsongs = [];
+            var progress = function(){return songcount + '/' + allsongs.length + ' songs. ';};
             songlists.forEach(function(songlist){
-                songlist.songs.forEach(function(song){
-                    searchTasks.push(
-                        song.getGMusicId().then(function(){
-                        if (song.id) {
-                            ++songcount;
-                        }
-                        log.progress = progress();
-                        log.up(song.title,"search complete",song);
-                    }));
-                });
+                allsongs = allsongs.concat(songlist.songs);
             });
-            log.progress = progress();
-            log.up('searching...');
-            return Promise.all(searchTasks).then(function() {
-                log.up('song search complete for ' +
-                       songlists.length+' playlists',songlists);
+            stat.progress = progress();
+            stat.update('searching...');
+            var searchCompleted = function() {
+                stat.update('song search complete for ' +
+                       songlists.length+' playlists');
                 return songlists;
-            },function(err){log.up('error',err)});
+            };
+            var searchFailed = function(err) {
+                stat.update('search error');
+                console.log(err);
+            };
+            var looper = new ALooper(allsongs);
+            return looper.forEach(function(song){
+                return song.getGMusicId().then(function(){
+                    if (song.id) {
+                        ++songcount;
+                        stat.update("found: "+song.title+" by "+song.artist);
+                    }
+                    stat.progress = progress();
+                });
+            }).then(searchCompleted,searchFailed);
         };
         /* create playlists for the songlists */
         var createGMusicPlaylists = function(songlists) {
@@ -383,9 +375,9 @@ Importer.prototype = {
                         createdlists = createdlists.concat(gmusiclists);
                     }));
             });
-            log.up('creating '+createTasks.length+' playlists');
+            stat.update('creating '+createTasks.length+' playlists');
             return Promise.all(createTasks).then(function() {
-                log.up('created '+createdlists.length+' playlists',createdlists);
+                stat.update('created '+createdlists.length+' playlists');
                 return createdlists;
             });
         };
@@ -431,7 +423,7 @@ XDoc.prototype = {
         for (var i = 0; i < xpathresults.snapshotLength; i++) {
             results.push(xpathresults.snapshotItem(i));
         }
-        log.up('searching for xpath'+xpath);
+        debug('searching for xpath'+xpath);
         return results;
     },
     /* create a XDoc from a string (text/html by default) */
@@ -449,6 +441,8 @@ XDoc.prototype = {
 function ALooper(arr) {
     this.arr = arr;
     this.chunk = 50;
+    this.pause = 1;
+    this.pausefunc = function(){};
 }
 ALooper.prototype = {
     constructor: ALooper,
@@ -457,17 +451,30 @@ ALooper.prototype = {
         var looper = this;
         return new Promise(function(resolve,rej){
             var i = 0;
-            (function iterator() {
-            if (!(i < looper.arr.length)) {
-                resolve(rcb); return;
-            }
-            var val = looper.arr[i++];
-            lcb(val,i,looper.arr);
-            (i%looper.chunk)? iterator() : setTimeout(iterator,1);
-            })();
+            var promises = [];
+            var iterator = function () {
+                if (i >= looper.arr.length) {
+                    Promise.all(promises).then(resolve);
+                    return;
+                }
+                var arrval = looper.arr[i++];
+                var callbackpromise = lcb(arrval,i,looper.arr);
+                promises.push(callbackpromise);
+                var pauseAndContinue = function() {
+                    promises = [];
+                    looper.pausefunc();
+                    setTimeout(iterator,looper.pause);
+                };
+                if (i%looper.chunk === 0 && i !== 0) {
+                    Promise.all(promises).then(pauseAndContinue);
+                } else {
+                    iterator();
+                }
+            };
+            iterator();
         });
     }
-}
+};
 
 /* a filtered list of songs*/
 function Filter(initialList) {
@@ -482,7 +489,7 @@ Filter.prototype = {
     _apply: function(prop,val,exact) {
         var filter = this;
         if (!val) {
-            return new Promise(function(res,rej){res(filter)});
+            return new Promise(function(res,rej){res(filter);});
         }
         var fsongs = [];
         return new ALooper(filter.songs).forEach(function(song,sidx){
@@ -497,7 +504,7 @@ Filter.prototype = {
                 filter.hasMatch = true;
                 filter.songs = fsongs;
             }
-            log.up(null,null,null,'applyed filter '+prop+':'+val,filter);
+            trace('applyed filter '+prop+':'+val,filter);
             return filter;
         });
     },
@@ -522,13 +529,12 @@ Filter.prototype = {
         var keys = Object.keys(song);
         var filter = this;
         var filters = [];
-        
         /* apply the filters one after another asyncly */
         return new Promise(function(resolve,rej){
             var keyidx = 0;
             (function iterator() {
-                if (!(keyidx < keys.length)) {            
-                    log.up(null,null,null,'filter complete for '+song.title,filter);
+                if (keyidx >= keys.length) {
+                    trace('filter complete for '+song.title,filter);
                     resolve(filter); return;
                 }
                 var key = keys[keyidx++];
@@ -548,9 +554,46 @@ function Songlist(name,id) {
     this.songs = [];
     /** the google id for this playlist */
     this.id = id;
+    this.songsByArtistMap = null;
 }
 Songlist.prototype = {
     constructor: Songlist,
+    indexSongsByArtist: function() {
+        var slist = this;
+        slist.songsByArtistMap = {};
+        slist.songs.forEach(function(song){
+            var artistKey = slist.getIndexKey(song.artist);
+            if (!(artistKey in slist.songsByArtistMap)) {
+                slist.songsByArtistMap[artistKey] = [];
+            }
+            slist.songsByArtistMap[artistKey].push(song);
+        });
+    },
+    getIndexKey: function(value) {
+        if (value === null || value === "") {
+            return "";
+        }
+        var key = value.toLowerCase();
+        key = key.replace(/ and.*| &.*/,"");
+        key = key.replace("the ","");
+        key = key.replace(STRU.brackets,"");
+        key = key.replace(/[\W_]+/,"");
+        return key;
+    },
+    songsByArtist: function(artist) {
+        if (!artist || artist === "") {
+            return [];
+        }
+        var slist = this;
+        var artistKey = slist.getIndexKey(artist);
+        if (slist.songsByArtistMap === null) {
+            slist.indexSongsByArtist();
+        }
+        if (artistKey in slist.songsByArtistMap) {
+            return slist.songsByArtistMap[artistKey];
+        }
+        return [];
+    },
     /* split this songlist into multiple lists */
     split: function(splitSize) {
         var songlist = this;
@@ -564,19 +607,19 @@ Songlist.prototype = {
         if (splitSonglists.length < 2) {
             splitSonglists = [songlist];
         }
-        log.up('split songlist',splitSonglists);
+        stat.update('split songlist');
         return splitSonglists;
     },
     /* create GMusic playlists from this songlist */
     toGMusic: function(sess) {
         var songlist = this;
         if (songlist.id) {
-            log.up('has google id',songlist);
+            trace('has google id',songlist);
             return new Promise(function(res,rej){res([songlist]);});
         }
         sess = !sess? session : sess;
         var music = new GMusic(sess);
-        log.up('creating playlist',songlist);
+        stat.update('creating playlist');
         return music.createPlaylist(songlist);
     },
     /* populate songlist from the typical gmusic response */
@@ -593,11 +636,11 @@ Songlist.prototype = {
         if (response.constructor === String) {
             var arr = JSON.parse(response);
             /* the usual list of found songs */
-            arr[1][0] && arr[1][0].forEach(function(sng) {
+            if( arr[1][0]) arr[1][0].forEach(function(sng) {
                 addsng(sng);
             });
             /* top suggested songs */
-            arr[1][3] && arr[1][3].forEach(function(sng){
+            if (arr[1][3]) arr[1][3].forEach(function(sng){
                 addsng(sng,true);
             });
             if (arr[1][4]) addsng(arr[1][4],true);
@@ -606,7 +649,7 @@ Songlist.prototype = {
                 addsng(song);
             });
         }
-        log.up(null,'loaded '+this.name,this);
+        trace('loaded '+this.name,this);
         return this;
     }
 };
@@ -654,7 +697,7 @@ Song.prototype = {
         if (!song.id || song.idtype === 2 || song.idtype === 6 || song.idtype === 1) {
             song.id = arr[0];
         }
-        log.up(null,null,null,'loaded song '+song.title,[song,arr]);
+        trace('loaded song '+song.title,[song,arr]);
         return song;
     },
     /* return the id if not null, otherwise search GMusic for the id,
@@ -666,9 +709,9 @@ Song.prototype = {
         }
         sess = !sess? session : sess;
         var music = new GMusic(sess);
-        log.up(null,'looking for song id for '+song.title,song);
+        trace('looking for song id for '+song.title,song);
         return music.search(song).then(function(filter){
-            log.up(null,song.title+' search complete',[song,filter]);
+            trace(song.title+' search complete',[song,filter]);
             if (filter.hasMatch) {
                 song.notes = STRU.pad(filter.songs.length,2) +
                     ' results match ';
@@ -677,9 +720,11 @@ Song.prototype = {
                 });
                 new Converter().update(song,filter.songs[0]);
             }
-            log.up(null,null,null,song.title+' id search complete');
+            trace(song.title+' id search complete');
             return song.id;
-        },function(err){log.up(err)});
+        },function(err){
+            stat.update("search error");
+            console.log(err,song);});
     }
 };
 
@@ -700,7 +745,8 @@ GMusic.prototype = {
                 resolve(rval);
             };
             var balancedload = function() { setTimeout(onload,1); };
-            var onerror = function() { reject(Error('network error')); };
+            var onerror = function() {
+                reject(Error('network error')); };
             request.addEventListener("load",balancedload,false);
             request.addEventListener("error",onerror,false);
             var postData = session.getPostArray();
@@ -709,18 +755,20 @@ GMusic.prototype = {
         });
     },
     /* return a songlist of songs from the service based on search_string */
-    searchService: function(search_string) {
+    searchService: function(search_string,attempts) {
+        attempts = (attempts)? attempts : 0;
         var gmusic = this;
         return this._req("services/search",[search_string,10,null,1]).then(function(resp){
             var resultlist = new Songlist(search_string+' search results').fromGMusic(resp);
             if (!resultlist.songs.length) {
                 var suggestion = JSON.parse(resp)[1][10];
-                if (suggestion) {
-                    log.up(null,'retrying search using suggestion '+suggestion,[resp]);
-                    return gmusic.searchService(suggestion);
+                if (suggestion && attempts < 3) {
+                    debug('retrying search using suggestion '+suggestion,[resp]);
+                    attempts = attempts + 1;
+                    return gmusic.searchService(suggestion,attempts);
                 }
             }
-            log.up(null,'recieved search response for '+search_string,[resp,resultlist]);
+            debug('recieved search response for '+search_string,[resp,resultlist]);
             return resultlist;
         });
     },
@@ -745,12 +793,13 @@ GMusic.prototype = {
                 hasBrackets = true;
             }
         });
-        processes.push(gmusic.getLibrary().then(
-            function(slist){songs = songs.concat(slist.songs);}));
+        processes.push(gmusic.getLibrary().then(function(lib){
+            songs = songs.concat(lib.songsByArtist(song.artist));
+        }));
         processes.push(gmusic.searchService(search_string(song)).then(
             function(slist){songs = songs.concat(slist.songs);}));
-        if (hasBrackets) {
-            log.up(null,'performing extra search for bracketless version '+bless.title,bless);
+        if (search_string(song).match(STRU.brackets)) {
+            debug('performing extra search for bracketless version '+bless.title,bless);
             processes.push(gmusic.searchService(search_string(bless)).then(
             function(slist){songs = songs.concat(slist.songs);}));
         }
@@ -761,31 +810,31 @@ GMusic.prototype = {
             return filter.bySong(song);
         };
         var filterBrackets = function(filter) {
-            if (hasBrackets && !filter.match['title'] ) {
+            if (hasBrackets && !filter.match.title ) {
                     filter.bySong(bless);
             }
             return filter;
-        }
+        };
         /* explicity titled songs sometimes have *'s in them */
         var filterWildChars = function(filter) {
-            if (!filter.match['title'] && song.title.match(STRU.wildWords)) {
+            if (!filter.match.title && song.title.match(STRU.wildWords)) {
                 var tame = new Converter({'tprefix':null}).clone(song);
                 tame.title = song.title.replace(STRU.wildWords,'');
                 filter.bySong(tame);
             }
             return filter;
-        }
+        };
         /* attempt to get an exact match */
         var findExactMatch = function(filter) {
-            if (!filter.match['title']) return filter;
+            if (!filter.match.title) return filter;
             return filter.byExactSong(song);
-        }
+        };
         var removeDuplicates = function(filter) {
             if (filter.hasMatch) {
                 filter.removeDuplicates();
             }
             return filter;
-        }
+        };
         return Promise.all(processes).then(createFilter).then(
             filterResults).then(
             filterBrackets).then(
@@ -859,20 +908,19 @@ GMusic.prototype = {
     createPlaylist: function(songlist) {
         var gmusic = this;
         var lists = songlist.split(1000);
-        
         var createEmptyPlaylist = function(list) {
-            log.up('creating empty '+list.name+' playlist');
+            stat.update('creating empty '+list.name+' playlist');
             return gmusic._req("services/createplaylist",[false,list.name,null,[]],list);
         };
         var updateListId = function(respList) {
             var list = respList[1];
             var id = JSON.parse(respList[0])[1][0];
             list.id = id;
-            log.up('updated '+list.name+' id',list);
+            stat.update('updated '+list.name+' id');
             return list;
         };
         var updatePlaylist = function(plist) {
-            log.up('updated '+plist.name+' songs',plist);
+            stat.update('updated '+plist.name+' songs');
             return gmusic.addToPlaylist(plist);
         };
 
@@ -882,7 +930,7 @@ GMusic.prototype = {
                 updateListId).then(updatePlaylist));
         });
         return Promise.all(tasks).then(function(){
-            log.up('created '+lists.length+' playlists',lists);
+            stat.update('created '+lists.length+' playlists');
             return lists;
         });
     },
@@ -894,7 +942,7 @@ GMusic.prototype = {
                 psongs.push([song.id,Number(song.idtype)]);
             }
         });
-        log.up('adding tracks to '+songlist.name,[songlist,playlist]);
+        stat.update('adding tracks to '+songlist.name);
         return this._req("services/addtrackstoplaylist",playlist);
     }
 };
@@ -903,6 +951,8 @@ GMusic.prototype = {
 function SessionInfo(src) {
     /* the library cache */
     this.libraryCache = null;
+    /* the dv value */
+    this.dv = null;
     /* the xt code, not sure exactly what this is yet */
     this.xtcode = null;
     /* the session id, is sent in posts */
@@ -922,7 +972,7 @@ SessionInfo.prototype = {
         return this.xtcode && this.sessionid && this.obfid;
     },
     getQuery: function() {
-        return "u=0&xt="+this.xtcode+"&obfid="+this.obfid;
+        return "u=0&xt="+this.xtcode+"&dv="+this.dv+"&obfid="+this.obfid;
     },
     getPostArray: function() {
         return [[this.sessionid,1],null];
@@ -933,9 +983,10 @@ SessionInfo.prototype = {
             return;
         }
         var qps = tap.getQueryParams();
-        if ('xt' in qps && 'obfid' in qps) {
+        if ('xt' in qps && 'obfid' in qps && 'dv' in qps) {
             this.xtcode = qps.xt;
             this.obfid = qps.obfid;
+            this.dv = qps.dv;
         }
         if (tap.method.toLowerCase() == 'post') {
             try {
@@ -1018,25 +1069,21 @@ var addui = function() {
     var inputui = ui.create('input',false,{'type':'file'});
     var importui = ui.create(
         'div',[ui.create('h4','Import Playlists'),inputui]);
-    
     var exportlink = ui.create('a','Export Playlists',{'href':'#exportCSV'});
     var exportui = ui.create('div',ui.create('h4',exportlink));
-    
     var statusout = ui.create('h6','ready');
     var statusui = ui.create('div',[statusout]);
-    log.status = statusout;
-    
+    stat.element = statusout;
     var exporter = new Exporter();
     exporter.listenTo(exportlink);
     var importer = new Importer();
     importer.listenTo(inputui);
-    
     if (menu) {
         menu.appendChild(importui);
         menu.appendChild(exportui);
         menu.appendChild(statusui);
     } else {
-        log.up('unable to locate menu element');
+        console.log('unable to locate menu element');
     }
 };
 window.addEventListener ("load", addui, false);
@@ -1049,3 +1096,6 @@ tap.sendcallback = function() {
     session.fromTap(tap);
 };
 tap.inject();
+
+
+
