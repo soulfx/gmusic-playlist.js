@@ -3,7 +3,7 @@
 // @author       soulfx <john.elkins@yahoo.com>
 // @name         gmusic-playlist
 // @namespace    https://github.com/soulfx/gmusic-playlist.js
-// @version      0.160528
+// @version      0.170301
 // @description  import and export playlists in google music
 // @match        https://play.google.com/music/listen*
 // @grant        none
@@ -14,7 +14,7 @@
 
 var debug = function() { console.log(arguments); };
 var trace = function() {/* do nothing */};
-var debug = function() {/* do nothing */}
+var debug = function() {/* do nothing */};
 
 function Status() {
     this.element = null;
@@ -636,14 +636,17 @@ Songlist.prototype = {
         if (response.constructor === String) {
             var arr = JSON.parse(response);
             /* the usual list of found songs */
-            if( arr[1][0]) arr[1][0].forEach(function(sng) {
-                addsng(sng);
+            if (arr[1][16]) arr[1][16].forEach(function(search_type) {
+                if (search_type.length > 1) search_type[1].forEach(function(sng) {
+                    addsng(sng[0]);
+                });
             });
             /* top suggested songs */
+            /* not sure where this info is anymore
             if (arr[1][3]) arr[1][3].forEach(function(sng){
                 addsng(sng,true);
             });
-            if (arr[1][4]) addsng(arr[1][4],true);
+            if (arr[1][4]) addsng(arr[1][4],true); */
         } else {
             response.forEach(function(song){
                 addsng(song);
@@ -758,7 +761,7 @@ GMusic.prototype = {
     searchService: function(search_string,attempts) {
         attempts = (attempts)? attempts : 0;
         var gmusic = this;
-        return this._req("services/search",[search_string,10,null,1]).then(function(resp){
+        return this._req("services/search",[search_string,10,[1,1,1,1,1,1,1,1,1],1,null,true]).then(function(resp){
             var resultlist = new Songlist(search_string+' search results').fromGMusic(resp);
             if (!resultlist.songs.length) {
                 var suggestion = JSON.parse(resp)[1][10];
