@@ -55,6 +55,10 @@ click the Export Playlists link to export the playlists.
 in addition to playlists, the entire personal library will also be exported
 into a playlist called Library.
 
+## debugging
+
+when editing the script in tampermonkey place `debugger;` statements within the script to have the debugger console stop at those breakpoints so that variables and logic can be easily inspected.  since google may change the response format for search and song data, the key place to check that the code is looking for data in the right place are in the fromGMusic methods of the Songlist and Song structures.
+
 ## known issues
 
 ### no firefox support
